@@ -95,6 +95,25 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        .provider-status {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #e8f5e9;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .debug-log {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f0f0f0;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -117,7 +136,8 @@
         
         <div class="results" id="results">
             <h2>Token Balances</h2>
-            <p id="connectedNetwork" style="color: #4CAF50; margin-bottom: 15px;"></p>
+            <div id="provider-info" class="provider-status"></div>
+            
             <div class="token-balance" id="usdtBalance">
                 <h3>USDT (Tether)</h3>
                 <p>Balance: <span id="usdtValue">-</span> USDT</p>
@@ -128,40 +148,167 @@
                 <p>Balance: <span id="usdcValue">-</span> USDC</p>
             </div>
         </div>
+        
+        <div class="debug-log" id="debug-log"></div>
+        <p style="text-align: center; margin-top: 20px;">
+            <a href="#" id="toggle-debug">Show Debug Log</a>
+        </p>
     </div>
 
     <script>
-        // Token contract addresses on Ethereum mainnet
-        const USDT_CONTRACT = '0xdAC17F958D2ee523a2206206994597C13D831ec7'; // USDT
-        const USDC_CONTRACT = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC
-
-        // Fixed decimals for these tokens on Ethereum mainnet
-        // This avoids the need to call the decimals() function which can sometimes fail
-        const USDT_DECIMALS = 6; 
-        const USDC_DECIMALS = 6;
-
-        // ERC20 token ABI (simplified for balanceOf function only)
-        const TOKEN_ABI = [
+        // Enable debug mode
+        const DEBUG = true;
+        
+        // Log function that also writes to debug div
+        function debugLog(message) {
+            if (DEBUG) {
+                const debugDiv = document.getElementById('debug-log');
+                const time = new Date().toLocaleTimeString();
+                console.log(`[${time}] ${message}`);
+                
+                const logEntry = document.createElement('div');
+                logEntry.textContent = `[${time}] ${message}`;
+                debugDiv.appendChild(logEntry);
+                debugDiv.scrollTop = debugDiv.scrollHeight;
+            }
+        }
+        
+        // Toggle debug log visibility
+        document.getElementById('toggle-debug').addEventListener('click', function(e) {
+            e.preventDefault();
+            const debugDiv = document.getElementById('debug-log');
+            if (debugDiv.style.display === 'none' || !debugDiv.style.display) {
+                debugDiv.style.display = 'block';
+                this.textContent = 'Hide Debug Log';
+            } else {
+                debugDiv.style.display = 'none';
+                this.textContent = 'Show Debug Log';
+            }
+        });
+        
+        // Token information
+        const tokenInfo = {
+            USDT: {
+                name: 'Tether USD',
+                address: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+                decimals: 6,
+                symbol: 'USDT'
+            },
+            USDC: {
+                name: 'USD Coin',
+                address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+                decimals: 6,
+                symbol: 'USDC'
+            }
+        };
+        
+        // ERC20 ABI - bare minimum for balanceOf
+        const MIN_ABI = [
             {
                 "constant": true,
-                "inputs": [{"name": "owner", "type": "address"}],
+                "inputs": [{"name": "_owner", "type": "address"}],
                 "name": "balanceOf",
-                "outputs": [{"name": "", "type": "uint256"}],
+                "outputs": [{"name": "balance", "type": "uint256"}],
                 "type": "function"
             }
         ];
-
-        // Define multiple provider endpoints
-        const providerUrls = [
-            "https://eth-mainnet.g.alchemy.com/v2/demo", // Alchemy public endpoint
-            "https://rpc.ankr.com/eth", // Ankr public endpoint
-            "https://cloudflare-eth.com", // Cloudflare
-            "https://mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161" // Infura
+        
+        // RPC provider endpoints - high quality public endpoints
+        const providerEndpoints = [
+            { name: "1RPC", url: "https://1rpc.io/eth" },
+            { name: "Ankr", url: "https://rpc.ankr.com/eth" },
+            { name: "Cloudflare", url: "https://cloudflare-eth.com" },
+            { name: "Alchemy Demo", url: "https://eth-mainnet.g.alchemy.com/v2/demo" },
+            { name: "Public Node", url: "https://ethereum.publicnode.com" }
         ];
         
-        // Initialize provider variable
-        let provider = null;
-
+        let activeProvider = null;
+        
+        // Try to connect to a provider
+        async function connectToProvider() {
+            for (const endpoint of providerEndpoints) {
+                try {
+                    debugLog(`Trying to connect to ${endpoint.name} at ${endpoint.url}`);
+                    
+                    const provider = new ethers.providers.JsonRpcProvider(endpoint.url);
+                    
+                    // Test the connection by getting the latest block number
+                    const blockNumber = await provider.getBlockNumber();
+                    debugLog(`Successfully connected to ${endpoint.name}. Block #${blockNumber}`);
+                    
+                    // Save the successful provider
+                    activeProvider = {
+                        instance: provider,
+                        name: endpoint.name,
+                        url: endpoint.url
+                    };
+                    
+                    document.getElementById('provider-info').textContent = 
+                        `Connected via: ${endpoint.name} - Latest Block: #${blockNumber}`;
+                    
+                    return provider;
+                } catch (error) {
+                    debugLog(`Failed to connect to ${endpoint.name}: ${error.message}`);
+                }
+            }
+            
+            throw new Error("Failed to connect to any Ethereum provider. Please check your internet connection and try again.");
+        }
+        
+        // Get token balance using a provider and token info
+        async function getTokenBalance(walletAddress, tokenData, provider) {
+            try {
+                debugLog(`Fetching ${tokenData.symbol} balance for ${walletAddress}`);
+                
+                // Create contract instance
+                const contract = new ethers.Contract(
+                    tokenData.address,
+                    MIN_ABI,
+                    provider
+                );
+                
+                // Query balance
+                const balance = await contract.balanceOf(walletAddress);
+                debugLog(`Raw ${tokenData.symbol} balance: ${balance.toString()}`);
+                
+                // Format with correct decimals
+                const formattedBalance = ethers.utils.formatUnits(balance, tokenData.decimals);
+                debugLog(`Formatted ${tokenData.symbol} balance: ${formattedBalance}`);
+                
+                return formattedBalance;
+            } catch (error) {
+                debugLog(`Error fetching ${tokenData.symbol} balance: ${error.message}`);
+                return "Error";
+            }
+        }
+        
+        // Use Etherscan API as a backup for balance checking
+        async function getBalanceFromEtherscan(walletAddress, tokenData) {
+            try {
+                debugLog(`Trying Etherscan API for ${tokenData.symbol} balance`);
+                
+                // Public Etherscan API endpoint (without API key - limited but works for basic queries)
+                const url = `https://api.etherscan.io/api?module=account&action=tokenbalance&contractaddress=${tokenData.address}&address=${walletAddress}&tag=latest`;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.status === "1") {
+                    const balance = ethers.BigNumber.from(data.result);
+                    const formattedBalance = ethers.utils.formatUnits(balance, tokenData.decimals);
+                    debugLog(`Etherscan ${tokenData.symbol} balance: ${formattedBalance}`);
+                    return formattedBalance;
+                } else {
+                    debugLog(`Etherscan API error: ${data.message}`);
+                    return "Error";
+                }
+            } catch (error) {
+                debugLog(`Error with Etherscan API: ${error.message}`);
+                return "Error";
+            }
+        }
+        
+        // Main function to check balances
         document.getElementById('checkBalance').addEventListener('click', async () => {
             const addressInput = document.getElementById('address').value.trim();
             const errorElement = document.getElementById('error');
@@ -171,7 +318,14 @@
             errorElement.style.display = 'none';
             resultsElement.style.display = 'none';
             
-            // Validate address format
+            // Clear previous debug logs
+            if (DEBUG) {
+                document.getElementById('debug-log').innerHTML = '';
+            }
+            
+            debugLog(`Checking balances for address: ${addressInput}`);
+            
+            // Validate address
             if (!ethers.utils.isAddress(addressInput)) {
                 errorElement.textContent = 'Please enter a valid Ethereum address';
                 errorElement.style.display = 'block';
@@ -181,74 +335,63 @@
             // Show loading spinner
             loadingElement.style.display = 'block';
             
-            // Normalize address
-            const normalizedAddress = ethers.utils.getAddress(addressInput);
-            
-            // Try to connect to an Ethereum node if we haven't already
-            if (!provider) {
-                for (const url of providerUrls) {
-                    try {
-                        console.log(`Trying provider: ${url}`);
-                        const tempProvider = new ethers.providers.JsonRpcProvider(url);
-                        // Test the connection
-                        await tempProvider.getNetwork();
-                        provider = tempProvider;
-                        console.log(`Connected to: ${url}`);
-                        break;
-                    } catch (e) {
-                        console.error(`Failed to connect to: ${url}`, e);
-                    }
-                }
-                
-                if (!provider) {
-                    errorElement.textContent = 'Failed to connect to Ethereum network. Please check your internet connection and try again.';
-                    errorElement.style.display = 'block';
-                    loadingElement.style.display = 'none';
-                    return;
-                }
-            }
-            
             try {
-                // Create contract instances
-                const usdtContract = new ethers.Contract(USDT_CONTRACT, TOKEN_ABI, provider);
-                const usdcContract = new ethers.Contract(USDC_CONTRACT, TOKEN_ABI, provider);
+                // Normalize address
+                const normalizedAddress = ethers.utils.getAddress(addressInput);
+                debugLog(`Normalized address: ${normalizedAddress}`);
                 
-                // Get balances (with try/catch for each token separately)
-                let usdtBalance = ethers.BigNumber.from(0);
-                let usdcBalance = ethers.BigNumber.from(0);
-                
-                try {
-                    usdtBalance = await usdtContract.balanceOf(normalizedAddress);
-                } catch (error) {
-                    console.error("Error fetching USDT balance:", error);
+                // Connect to provider if not already connected
+                let provider;
+                if (!activeProvider) {
+                    try {
+                        provider = await connectToProvider();
+                    } catch (providerError) {
+                        throw new Error(`Provider connection failed: ${providerError.message}`);
+                    }
+                } else {
+                    provider = activeProvider.instance;
+                    debugLog(`Using existing provider: ${activeProvider.name}`);
                 }
                 
-                try {
-                    usdcBalance = await usdcContract.balanceOf(normalizedAddress);
-                } catch (error) {
-                    console.error("Error fetching USDC balance:", error);
+                // Get token balances - try Web3 first, then fallback to Etherscan
+                let usdtBalance = "Error";
+                let usdcBalance = "Error";
+                
+                // Try primary method
+                usdtBalance = await getTokenBalance(normalizedAddress, tokenInfo.USDT, provider);
+                usdcBalance = await getTokenBalance(normalizedAddress, tokenInfo.USDC, provider);
+                
+                // Fallback to Etherscan if needed
+                if (usdtBalance === "Error") {
+                    usdtBalance = await getBalanceFromEtherscan(normalizedAddress, tokenInfo.USDT);
                 }
                 
-                // Format balances with fixed decimals
-                const formattedUsdtBalance = ethers.utils.formatUnits(usdtBalance, USDT_DECIMALS);
-                const formattedUsdcBalance = ethers.utils.formatUnits(usdcBalance, USDC_DECIMALS);
+                if (usdcBalance === "Error") {
+                    usdcBalance = await getBalanceFromEtherscan(normalizedAddress, tokenInfo.USDC);
+                }
                 
-                // Update UI
-                document.getElementById('usdtValue').textContent = formattedUsdtBalance;
-                document.getElementById('usdcValue').textContent = formattedUsdcBalance;
+                // Update UI with balances
+                document.getElementById('usdtValue').textContent = 
+                    usdtBalance === "Error" ? "Error fetching balance" : usdtBalance;
                 
-                // Get the connected network information
-                const network = await provider.getNetwork();
-                document.getElementById('connectedNetwork').textContent = 
-                    `Connected to: ${network.name} (Chain ID: ${network.chainId})`;
+                document.getElementById('usdcValue').textContent = 
+                    usdcBalance === "Error" ? "Error fetching balance" : usdcBalance;
                 
-                // Hide loading, show results
+                // Show results
                 loadingElement.style.display = 'none';
                 resultsElement.style.display = 'block';
+                
+                // If both failed, still show an error
+                if (usdtBalance === "Error" && usdcBalance === "Error") {
+                    errorElement.textContent = "Failed to fetch any token balances. Please try again later.";
+                    errorElement.style.display = 'block';
+                }
+                
             } catch (error) {
-                console.error('Error fetching balances:', error);
-                // Show a more detailed error message
-                errorElement.textContent = `Error: ${error.message || 'Unknown error'}`;
+                console.error('Error:', error);
+                debugLog(`Critical error: ${error.message}`);
+                
+                errorElement.textContent = `Error: ${error.message}`;
                 errorElement.style.display = 'block';
                 loadingElement.style.display = 'none';
             }

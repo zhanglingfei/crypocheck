@@ -117,6 +117,7 @@
         
         <div class="results" id="results">
             <h2>Token Balances</h2>
+            <p id="connectedNetwork" style="color: #4CAF50; margin-bottom: 15px;"></p>
             <div class="token-balance" id="usdtBalance">
                 <h3>USDT (Tether)</h3>
                 <p>Balance: <span id="usdtValue">-</span> USDT</p>
@@ -152,22 +153,16 @@
             }
         ];
 
-        // Use multiple providers in case one fails
-        let provider;
-        try {
-            // Try Infura first
-            provider = new ethers.providers.JsonRpcProvider("https://mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161");
-            
-            // Quick check if provider is connected
-            provider.getBlockNumber().catch(() => {
-                console.log("Infura failed, trying Cloudflare...");
-                provider = new ethers.providers.JsonRpcProvider("https://cloudflare-eth.com");
-            });
-        } catch (e) {
-            // Fallback to Cloudflare
-            console.log("Infura setup failed, using Cloudflare");
-            provider = new ethers.providers.JsonRpcProvider("https://cloudflare-eth.com");
-        }
+        // Define multiple provider endpoints
+        const providerUrls = [
+            "https://eth-mainnet.g.alchemy.com/v2/demo", // Alchemy public endpoint
+            "https://rpc.ankr.com/eth", // Ankr public endpoint
+            "https://cloudflare-eth.com", // Cloudflare
+            "https://mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161" // Infura
+        ];
+        
+        // Initialize provider variable
+        let provider = null;
 
         document.getElementById('checkBalance').addEventListener('click', async () => {
             const addressInput = document.getElementById('address').value.trim();
@@ -191,14 +186,47 @@
             // Normalize address
             const normalizedAddress = ethers.utils.getAddress(addressInput);
             
+            // Try to connect to an Ethereum node if we haven't already
+            if (!provider) {
+                for (const url of providerUrls) {
+                    try {
+                        console.log(`Trying provider: ${url}`);
+                        const tempProvider = new ethers.providers.JsonRpcProvider(url);
+                        // Test the connection
+                        await tempProvider.getNetwork();
+                        provider = tempProvider;
+                        console.log(`Connected to: ${url}`);
+                        break;
+                    } catch (e) {
+                        console.error(`Failed to connect to: ${url}`, e);
+                    }
+                }
+                
+                if (!provider) {
+                    errorElement.textContent = 'Failed to connect to Ethereum network. Please check your internet connection and try again.';
+                    errorElement.style.display = 'block';
+                    loadingElement.style.display = 'none';
+                    return;
+                }
+            }
+            
             try {
                 // Create contract instances
                 const usdtContract = new ethers.Contract(USDT_CONTRACT, TOKEN_ABI, provider);
                 const usdcContract = new ethers.Contract(USDC_CONTRACT, TOKEN_ABI, provider);
                 
-                // Get decimals for each token
-                const usdtDecimals = await usdtContract.decimals();
-                const usdcDecimals = await usdcContract.decimals();
+                // USDT uses 6 decimals and USDC uses 6 decimals on Ethereum mainnet
+                // Hardcoding these values can help if the contract calls fail
+                let usdtDecimals = 6;
+                let usdcDecimals = 6;
+                
+                try {
+                    // Still try to get the actual values from the contracts
+                    usdtDecimals = await usdtContract.decimals();
+                    usdcDecimals = await usdcContract.decimals();
+                } catch (error) {
+                    console.warn("Could not fetch decimals, using default values", error);
+                }
                 
                 // Get balances
                 const usdtBalance = await usdtContract.balanceOf(normalizedAddress);
@@ -211,6 +239,11 @@
                 // Update UI
                 document.getElementById('usdtValue').textContent = formattedUsdtBalance;
                 document.getElementById('usdcValue').textContent = formattedUsdcBalance;
+                
+                // Get the connected network information
+                const network = await provider.getNetwork();
+                document.getElementById('connectedNetwork').textContent = 
+                    `Connected to: ${network.name} (Chain ID: ${network.chainId})`;
                 
                 // Hide loading, show results
                 loadingElement.style.display = 'none';

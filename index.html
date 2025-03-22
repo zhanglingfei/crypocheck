@@ -135,6 +135,11 @@
         const USDT_CONTRACT = '0xdAC17F958D2ee523a2206206994597C13D831ec7'; // USDT
         const USDC_CONTRACT = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'; // USDC
 
+        // Fixed decimals for these tokens on Ethereum mainnet
+        // This avoids the need to call the decimals() function which can sometimes fail
+        const USDT_DECIMALS = 6; 
+        const USDC_DECIMALS = 6;
+
         // ERC20 token ABI (simplified for balanceOf function only)
         const TOKEN_ABI = [
             {
@@ -142,13 +147,6 @@
                 "inputs": [{"name": "owner", "type": "address"}],
                 "name": "balanceOf",
                 "outputs": [{"name": "", "type": "uint256"}],
-                "type": "function"
-            },
-            {
-                "constant": true,
-                "inputs": [],
-                "name": "decimals",
-                "outputs": [{"name": "", "type": "uint8"}],
                 "type": "function"
             }
         ];
@@ -215,26 +213,25 @@
                 const usdtContract = new ethers.Contract(USDT_CONTRACT, TOKEN_ABI, provider);
                 const usdcContract = new ethers.Contract(USDC_CONTRACT, TOKEN_ABI, provider);
                 
-                // USDT uses 6 decimals and USDC uses 6 decimals on Ethereum mainnet
-                // Hardcoding these values can help if the contract calls fail
-                let usdtDecimals = 6;
-                let usdcDecimals = 6;
+                // Get balances (with try/catch for each token separately)
+                let usdtBalance = ethers.BigNumber.from(0);
+                let usdcBalance = ethers.BigNumber.from(0);
                 
                 try {
-                    // Still try to get the actual values from the contracts
-                    usdtDecimals = await usdtContract.decimals();
-                    usdcDecimals = await usdcContract.decimals();
+                    usdtBalance = await usdtContract.balanceOf(normalizedAddress);
                 } catch (error) {
-                    console.warn("Could not fetch decimals, using default values", error);
+                    console.error("Error fetching USDT balance:", error);
                 }
                 
-                // Get balances
-                const usdtBalance = await usdtContract.balanceOf(normalizedAddress);
-                const usdcBalance = await usdcContract.balanceOf(normalizedAddress);
+                try {
+                    usdcBalance = await usdcContract.balanceOf(normalizedAddress);
+                } catch (error) {
+                    console.error("Error fetching USDC balance:", error);
+                }
                 
-                // Format balances with correct decimals
-                const formattedUsdtBalance = ethers.utils.formatUnits(usdtBalance, usdtDecimals);
-                const formattedUsdcBalance = ethers.utils.formatUnits(usdcBalance, usdcDecimals);
+                // Format balances with fixed decimals
+                const formattedUsdtBalance = ethers.utils.formatUnits(usdtBalance, USDT_DECIMALS);
+                const formattedUsdcBalance = ethers.utils.formatUnits(usdcBalance, USDC_DECIMALS);
                 
                 // Update UI
                 document.getElementById('usdtValue').textContent = formattedUsdtBalance;

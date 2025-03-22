@@ -125,6 +125,16 @@
             <input type="text" id="address" placeholder="0x...">
         </div>
         
+        <div class="input-group">
+            <label for="network">Network</label>
+            <select id="network">
+                <option value="ethereum" selected>Ethereum (ERC-20)</option>
+                <option value="bsc">Binance Smart Chain (BEP-20)</option>
+                <option value="polygon">Polygon</option>
+                <option value="tron">Tron (TRC-20)</option>
+            </select>
+        </div>
+        
         <button id="checkBalance">Check Balance</button>
         
         <div class="loading" id="loading">
@@ -186,21 +196,39 @@
             }
         });
         
-        // Token information
+        // Token information - verified contract addresses on Ethereum mainnet
         const tokenInfo = {
             USDT: {
                 name: 'Tether USD',
-                address: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+                address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', // Verified Ethereum Mainnet USDT
                 decimals: 6,
                 symbol: 'USDT'
             },
             USDC: {
                 name: 'USD Coin',
-                address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+                address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // Verified Ethereum Mainnet USDC
                 decimals: 6,
                 symbol: 'USDC'
             }
         };
+        
+        // Alternative contract addresses (some older or alternative implementations)
+        const alternativeTokens = [
+            {
+                name: 'USDT (Alternative)',
+                address: '0x9ed1f9696a01cd05b473a42d01db0c3d7999b8f2',
+                decimals: 6,
+                symbol: 'USDT-ALT',
+                originalSymbol: 'USDT'
+            },
+            {
+                name: 'USDC (Circle)',
+                address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E',
+                decimals: 6,
+                symbol: 'USDC-CIRCLE',
+                originalSymbol: 'USDC'
+            }
+        ];
         
         // ERC20 ABI - bare minimum for balanceOf
         const MIN_ABI = [
@@ -213,20 +241,83 @@
             }
         ];
         
-        // RPC provider endpoints - high quality public endpoints
-        const providerEndpoints = [
-            { name: "1RPC", url: "https://1rpc.io/eth" },
-            { name: "Ankr", url: "https://rpc.ankr.com/eth" },
-            { name: "Cloudflare", url: "https://cloudflare-eth.com" },
-            { name: "Alchemy Demo", url: "https://eth-mainnet.g.alchemy.com/v2/demo" },
-            { name: "Public Node", url: "https://ethereum.publicnode.com" }
-        ];
+        // RPC provider endpoints for different networks
+        const networkEndpoints = {
+            ethereum: [
+                { name: "1RPC", url: "https://1rpc.io/eth" },
+                { name: "Ankr", url: "https://rpc.ankr.com/eth" },
+                { name: "Cloudflare", url: "https://cloudflare-eth.com" },
+                { name: "Alchemy Demo", url: "https://eth-mainnet.g.alchemy.com/v2/demo" },
+                { name: "Public Node", url: "https://ethereum.publicnode.com" }
+            ],
+            bsc: [
+                { name: "Ankr BSC", url: "https://rpc.ankr.com/bsc" },
+                { name: "BSC RPC", url: "https://bsc-dataseed.binance.org/" },
+                { name: "BSC RPC 2", url: "https://bsc-dataseed1.defibit.io/" }
+            ],
+            polygon: [
+                { name: "Polygon RPC", url: "https://polygon-rpc.com" },
+                { name: "Ankr Polygon", url: "https://rpc.ankr.com/polygon" }
+            ],
+            tron: [
+                { name: "Tron Grid", url: "https://api.trongrid.io" }
+            ]
+        };
+        
+        // Token contract addresses for different networks
+        const networkTokens = {
+            ethereum: {
+                USDT: {
+                    name: 'Tether USD',
+                    address: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+                    decimals: 6,
+                    symbol: 'USDT'
+                },
+                USDC: {
+                    name: 'USD Coin',
+                    address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+                    decimals: 6,
+                    symbol: 'USDC'
+                }
+            },
+            bsc: {
+                USDT: {
+                    name: 'Tether USD (BSC)',
+                    address: '0x55d398326f99059fF775485246999027B3197955',
+                    decimals: 18,
+                    symbol: 'USDT'
+                },
+                USDC: {
+                    name: 'USD Coin (BSC)',
+                    address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
+                    decimals: 18,
+                    symbol: 'USDC'
+                }
+            },
+            polygon: {
+                USDT: {
+                    name: 'Tether USD (Polygon)',
+                    address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+                    decimals: 6,
+                    symbol: 'USDT'
+                },
+                USDC: {
+                    name: 'USD Coin (Polygon)',
+                    address: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+                    decimals: 6,
+                    symbol: 'USDC'
+                }
+            }
+        };
         
         let activeProvider = null;
         
         // Try to connect to a provider
-        async function connectToProvider() {
-            for (const endpoint of providerEndpoints) {
+        async function connectToProvider(network = 'ethereum') {
+            // Get endpoints for the selected network
+            const endpoints = networkEndpoints[network] || networkEndpoints.ethereum;
+            
+            for (const endpoint of endpoints) {
                 try {
                     debugLog(`Trying to connect to ${endpoint.name} at ${endpoint.url}`);
                     
@@ -236,15 +327,20 @@
                     const blockNumber = await provider.getBlockNumber();
                     debugLog(`Successfully connected to ${endpoint.name}. Block #${blockNumber}`);
                     
+                    // Get network info
+                    const networkInfo = await provider.getNetwork();
+                    debugLog(`Network info: ${JSON.stringify(networkInfo)}`);
+                    
                     // Save the successful provider
                     activeProvider = {
                         instance: provider,
                         name: endpoint.name,
-                        url: endpoint.url
+                        url: endpoint.url,
+                        network: networkInfo
                     };
                     
                     document.getElementById('provider-info').textContent = 
-                        `Connected via: ${endpoint.name} - Latest Block: #${blockNumber}`;
+                        `Connected via: ${endpoint.name} - Network: ${networkInfo.name} (Chain ID: ${networkInfo.chainId}) - Block: #${blockNumber}`;
                     
                     return provider;
                 } catch (error) {
@@ -336,32 +432,64 @@
             loadingElement.style.display = 'block';
             
             try {
+                // Get selected network
+                const selectedNetwork = document.getElementById('network').value;
+                debugLog(`Selected network: ${selectedNetwork}`);
+                
                 // Normalize address
                 const normalizedAddress = ethers.utils.getAddress(addressInput);
                 debugLog(`Normalized address: ${normalizedAddress}`);
                 
-                // Connect to provider if not already connected
+                // Connect to provider for the selected network
                 let provider;
-                if (!activeProvider) {
-                    try {
-                        provider = await connectToProvider();
-                    } catch (providerError) {
-                        throw new Error(`Provider connection failed: ${providerError.message}`);
+                try {
+                    // Always reconnect when checking balances to get the right network
+                    provider = await connectToProvider(selectedNetwork);
+                    if (!provider) {
+                        throw new Error(`Failed to connect to any ${selectedNetwork} providers`);
                     }
-                } else {
-                    provider = activeProvider.instance;
-                    debugLog(`Using existing provider: ${activeProvider.name}`);
+                } catch (providerError) {
+                    throw new Error(`Provider connection failed: ${providerError.message}`);
                 }
+                
+                // Get token info for the selected network
+                const tokenInfo = networkTokens[selectedNetwork] || networkTokens.ethereum;
+                debugLog(`Using token info for network: ${selectedNetwork}`);
                 
                 // Get token balances - try Web3 first, then fallback to Etherscan
                 let usdtBalance = "Error";
                 let usdcBalance = "Error";
                 
-                // Try primary method
+                // Try primary method with standard contracts
                 usdtBalance = await getTokenBalance(normalizedAddress, tokenInfo.USDT, provider);
                 usdcBalance = await getTokenBalance(normalizedAddress, tokenInfo.USDC, provider);
                 
-                // Fallback to Etherscan if needed
+                // Try alternative token contracts if balance is 0 or error
+                if (usdtBalance === "Error" || usdtBalance === "0.0") {
+                    debugLog("Trying alternative USDT contracts");
+                    for (const altToken of alternativeTokens.filter(t => t.originalSymbol === 'USDT')) {
+                        const altBalance = await getTokenBalance(normalizedAddress, altToken, provider);
+                        if (altBalance !== "Error" && altBalance !== "0.0") {
+                            usdtBalance = altBalance;
+                            debugLog(`Found USDT balance in alternative contract: ${altToken.address}`);
+                            break;
+                        }
+                    }
+                }
+                
+                if (usdcBalance === "Error" || usdcBalance === "0.0") {
+                    debugLog("Trying alternative USDC contracts");
+                    for (const altToken of alternativeTokens.filter(t => t.originalSymbol === 'USDC')) {
+                        const altBalance = await getTokenBalance(normalizedAddress, altToken, provider);
+                        if (altBalance !== "Error" && altBalance !== "0.0") {
+                            usdcBalance = altBalance;
+                            debugLog(`Found USDC balance in alternative contract: ${altToken.address}`);
+                            break;
+                        }
+                    }
+                }
+                
+                // Fallback to Etherscan if still needed
                 if (usdtBalance === "Error") {
                     usdtBalance = await getBalanceFromEtherscan(normalizedAddress, tokenInfo.USDT);
                 }
